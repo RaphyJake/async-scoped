@@ -66,7 +66,10 @@ pub mod use_async_std {
 #[cfg(feature = "use-tokio")]
 pub mod use_tokio {
     use super::*;
-    use tokio::{runtime::Handle, task as tokio_task};
+    use tokio::{
+        runtime::Handle,
+        task::{self as tokio_task, block_in_place, LocalSet},
+    };
 
     #[derive(Default)]
     pub struct Tokio;
@@ -101,10 +104,9 @@ pub mod use_tokio {
 
             match rt.runtime_flavor() {
                 tokio::runtime::RuntimeFlavor::CurrentThread => {
-                    tokio::runtime::Builder::new_current_thread()
-                        .build()
-                        .unwrap()
-                        .block_on(f)
+                    let local = LocalSet::new();
+
+                    local.run_until(f)
                 }
                 tokio::runtime::RuntimeFlavor::MultiThread => tokio_task::block_in_place(|| {
                     tokio::runtime::Builder::new_current_thread()

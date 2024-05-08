@@ -3,6 +3,12 @@
 //! without causing UB.
 use futures::Future;
 
+pub unsafe trait SpawnerLocal<T> {
+    type FutureOutput;
+    type SpawnHandle: Future<Output = Self::FutureOutput>;
+    fn spawn_local<F: Future<Output = T> + 'static>(&self, f: F) -> Self::SpawnHandle;
+}
+
 pub unsafe trait Spawner<T>: SpawnerLocal<T> {
     fn spawn<F: Future<Output = T> + Send + 'static>(
         &self,
@@ -18,12 +24,6 @@ pub unsafe trait FuncSpawner<T> {
 
 pub unsafe trait Blocker {
     fn block_on<T, F: Future<Output = T>>(&self, f: F) -> T;
-}
-
-pub unsafe trait SpawnerLocal<T> {
-    type FutureOutput;
-    type SpawnHandle: Future<Output = Self::FutureOutput>;
-    fn spawn_local<F: Future<Output = T> + 'static>(&self, f: F) -> Self::SpawnHandle;
 }
 
 #[cfg(feature = "use-async-std")]
@@ -66,7 +66,7 @@ pub mod use_async_std {
 #[cfg(feature = "use-tokio")]
 pub mod use_tokio {
     use super::*;
-    use tokio::task as tokio_task;
+    use tokio::{runtime::Handle, task as tokio_task};
 
     #[derive(Default)]
     pub struct Tokio;
@@ -97,12 +97,20 @@ pub mod use_tokio {
 
     unsafe impl Blocker for Tokio {
         fn block_on<T, F: Future<Output = T>>(&self, f: F) -> T {
-            tokio_task::block_in_place(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .build()
-                    .unwrap()
-                    .block_on(f)
-            })
+            let rt = Handle::current();
+
+            match rt.runtime_flavor() {
+                tokio::runtime::RuntimeFlavor::CurrentThread => {
+                    rt.block_on(f) // use current runtime directly
+                }
+                tokio::runtime::RuntimeFlavor::MultiThread => tokio_task::block_in_place(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .unwrap()
+                        .block_on(f)
+                }),
+                _ => todo!(),
+            }
         }
     }
 }

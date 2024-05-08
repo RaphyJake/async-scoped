@@ -3,10 +3,11 @@
 //! without causing UB.
 use futures::Future;
 
-pub unsafe trait Spawner<T> {
-    type FutureOutput;
-    type SpawnHandle: Future<Output = Self::FutureOutput> + Send;
-    fn spawn<F: Future<Output = T> + Send + 'static>(&self, f: F) -> Self::SpawnHandle;
+pub unsafe trait Spawner<T>: SpawnerLocal<T> {
+    fn spawn<F: Future<Output = T> + Send + 'static>(
+        &self,
+        f: F,
+    ) -> <Self as SpawnerLocal<T>>::SpawnHandle;
 }
 
 pub unsafe trait FuncSpawner<T> {
@@ -19,6 +20,12 @@ pub unsafe trait Blocker {
     fn block_on<T, F: Future<Output = T>>(&self, f: F) -> T;
 }
 
+pub unsafe trait SpawnerLocal<T> {
+    type FutureOutput;
+    type SpawnHandle: Future<Output = Self::FutureOutput>;
+    fn spawn_local<F: Future<Output = T> + 'static>(&self, f: F) -> Self::SpawnHandle;
+}
+
 #[cfg(feature = "use-async-std")]
 pub mod use_async_std {
     use super::*;
@@ -27,10 +34,16 @@ pub mod use_async_std {
     #[derive(Default)]
     pub struct AsyncStd;
 
-    unsafe impl<T: Send + 'static> Spawner<T> for AsyncStd {
+    unsafe impl<T: 'static> SpawnerLocal<T> for AsyncStd {
         type FutureOutput = T;
         type SpawnHandle = JoinHandle<T>;
 
+        fn spawn_local<F: Future<Output = T> + 'static>(&self, f: F) -> Self::SpawnHandle {
+            unimplemented!();
+        }
+    }
+
+    unsafe impl<T: Send + 'static> Spawner<T> for AsyncStd {
         fn spawn<F: Future<Output = T> + Send + 'static>(&self, f: F) -> Self::SpawnHandle {
             spawn(f)
         }
@@ -58,10 +71,16 @@ pub mod use_tokio {
     #[derive(Default)]
     pub struct Tokio;
 
-    unsafe impl<T: Send + 'static> Spawner<T> for Tokio {
+    unsafe impl<T: 'static> SpawnerLocal<T> for Tokio {
         type FutureOutput = Result<T, tokio_task::JoinError>;
         type SpawnHandle = tokio_task::JoinHandle<T>;
 
+        fn spawn_local<F: Future<Output = T> + 'static>(&self, f: F) -> Self::SpawnHandle {
+            tokio::task::spawn_local(f)
+        }
+    }
+
+    unsafe impl<T: Send + 'static> Spawner<T> for Tokio {
         fn spawn<F: Future<Output = T> + Send + 'static>(&self, f: F) -> Self::SpawnHandle {
             tokio_task::spawn(f)
         }

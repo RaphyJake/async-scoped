@@ -92,13 +92,31 @@ impl<'a, T: Send + 'static, Sp: Spawner<T> + Blocker> Scope<'a, T, Sp> {
     /// calling (and awaiting) the `cancel` method.
     pub fn spawn_blocking<F: FnOnce() -> T + Send + 'a>(&mut self, f: F)
     where
-        Sp: FuncSpawner<T, SpawnHandle = <Sp as Spawner<T>>::SpawnHandle>,
+        Sp: FuncSpawner<T, SpawnHandle = <Sp as SpawnerLocal<T>>::SpawnHandle>,
     {
         let handle = self.spawner().spawn_func(unsafe {
             std::mem::transmute::<_, Box<dyn FnOnce() -> T + Send>>(
                 Box::new(f) as Box<dyn FnOnce() -> T + Send>
             )
         });
+        self.futs.push_back(handle);
+        self.len += 1;
+    }
+}
+
+impl<'a, T: 'static, Sp: Spawner<T> + Blocker> Scope<'a, T, Sp> {
+    /// Spawn a future with the executor's `task::spawn` functionality. The
+    /// future is expected to be driven to completion before 'a expires.
+    pub fn spawn_local<F: Future<Output = T> + 'a>(&mut self, f: F) {
+        let handle = self
+            .spawner
+            .as_ref()
+            .expect("invariant:spawner is always available until scope is dropped")
+            .spawn_local(unsafe {
+                std::mem::transmute::<_, Pin<Box<dyn Future<Output = T> + Send>>>(
+                    Box::pin(f) as Pin<Box<dyn Future<Output = T>>>
+                )
+            });
         self.futs.push_back(handle);
         self.len += 1;
     }

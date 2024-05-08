@@ -101,7 +101,10 @@ pub mod use_tokio {
 
             match rt.runtime_flavor() {
                 tokio::runtime::RuntimeFlavor::CurrentThread => {
-                    rt.block_on(f) // use current runtime directly
+                    tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .unwrap()
+                        .block_on(f)
                 }
                 tokio::runtime::RuntimeFlavor::MultiThread => tokio_task::block_in_place(|| {
                     tokio::runtime::Builder::new_current_thread()
